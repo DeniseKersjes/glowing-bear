@@ -535,11 +535,11 @@ export class TransmartResourceService {
     const urlPart = 'observations/crosstable';
     let rowConstraintArr = [];
     rowHeaderConstraints.forEach((constraint: Constraint) => {
-      rowConstraintArr.push(constraint.toQueryObjectWithSubselection());
+      rowConstraintArr.push(constraint.toQueryObject());
     });
     let columnConstraintArr = [];
     columnHeaderConstraints.forEach((constraint: Constraint) => {
-      columnConstraintArr.push(constraint.toQueryObjectWithSubselection());
+      columnConstraintArr.push(constraint.toQueryObject());
     });
     const body = {
       subjectConstraint: baseConstraint.toQueryObject(),
