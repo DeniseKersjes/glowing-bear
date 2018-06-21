@@ -16,7 +16,6 @@ import {TransmartMapper} from '../utilities/transmart-utilities/transmart-mapper
 import {TransmartStudyDimensionElement} from '../models/transmart-models/transmart-study-dimension-element';
 import {TransmartStudy} from '../models/transmart-models/transmart-study';
 import {ExportDataType} from '../models/export-models/export-data-type';
-import {HttpErrorResponse} from '@angular/common/http';
 import {Dimension} from '../models/table-models/dimension';
 import {TransmartStudyDimensions} from '../models/transmart-models/transmart-study-dimensions';
 import {ConceptConstraint} from '../models/constraint-models/concept-constraint';
@@ -24,13 +23,45 @@ import {Aggregate} from '../models/aggregate-models/aggregate';
 import {CrossTable} from '../models/table-models/cross-table';
 import {TransmartCrossTable} from '../models/transmart-models/transmart-cross-table';
 import {ConstraintHelper} from '../utilities/constraint-utilities/constraint-helper';
-import {MessageHelper} from '../utilities/message-helper';
+import {AppConfig} from '../config/app.config';
+import {PicSureResourceService} from './picsure-services/picsure-resource.service';
+import {ApiType} from '../models/api-type';
+import {TransmartConstraintMapper} from '../utilities/transmart-utilities/transmart-constraint-mapper';
 
-
+/**
+ * This service should be the only one aware of the difference between PIC-SURE and tranSMART REST v2 APIs.
+ */
 @Injectable()
 export class ResourceService {
 
-  constructor(private transmartResourceService: TransmartResourceService) {
+  private apiType: ApiType;
+
+  constructor(private transmartResourceService: TransmartResourceService,
+              private picSureResourceService: PicSureResourceService,
+              private config: AppConfig) {
+    this.apiType = ApiType[String(this.config.getConfig('api-type', 'transmart')).toUpperCase()];
+    if (this.apiType === undefined) {
+      throw new Error(`api-type ${this.config.getConfig('api-type')} is invalid`);
+    }
+  }
+
+  init() {
+    switch (this.apiType) {
+      case ApiType.PICSURE:
+        this.picSureResourceService.init();
+    }
+  }
+
+  // -------------------------------------- utilities calls --------------------------------------
+
+  generateConstraintFromObject(constraintObjectInput: object): Constraint {
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return TransmartConstraintMapper.generateConstraintFromObject(constraintObjectInput);
+
+      case ApiType.PICSURE:
+        throw new Error('Not supported: PIC-SURE does not support custom constraints from tree');
+    }
   }
 
   // -------------------------------------- tree node calls --------------------------------------
@@ -39,7 +70,30 @@ export class ResourceService {
    * @returns {Observable<Study[]>}
    */
   getStudies(): Observable<Study[]> {
-    return this.transmartResourceService.getStudies();
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return this.transmartResourceService.getStudies();
+
+      case ApiType.PICSURE:
+        return Observable.of([]);
+    }
+  }
+
+  /**
+   * Get tree nodes from the root
+   * @param {number} depth - the depth of the tree we want to access
+   * @param {boolean} hasCounts - whether we want to include patient and observation counts in the tree nodes
+   * @param {boolean} hasTags - whether we want to include metadata in the tree nodes
+   * @returns {Observable<Object>}
+   */
+  getRootTreeNodes(depth: number, hasCounts: boolean, hasTags: boolean): Observable<object> { // todo: to treenode
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return this.transmartResourceService.getTreeNodes('\\', depth, hasCounts, hasTags);
+
+      case ApiType.PICSURE:
+        return this.picSureResourceService.getRootTreeNodes();
+    }
   }
 
   /**
@@ -50,8 +104,14 @@ export class ResourceService {
    * @param {boolean} hasTags - whether we want to include metadata in the tree nodes
    * @returns {Observable<Object>}
    */
-  getTreeNodes(root: string, depth: number, hasCounts: boolean, hasTags: boolean): Observable<object> {
-    return this.transmartResourceService.getTreeNodes(root, depth, hasCounts, hasTags);
+  getChildTreeNodes(root: string, depth: number, hasCounts: boolean, hasTags: boolean): Observable<object> { // todo: to treenode
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return this.transmartResourceService.getTreeNodes(root, depth, hasCounts, hasTags);
+
+      case ApiType.PICSURE:
+        return this.picSureResourceService.getChildNodes(root);
+    }
   }
 
   // -------------------------------------- observations calls --------------------------------------
@@ -62,7 +122,13 @@ export class ResourceService {
    * @returns {Observable<Object>}
    */
   getCountsPerStudyAndConcept(constraint: Constraint): Observable<object> {
-    return this.transmartResourceService.getCountsPerStudyAndConcept(constraint);
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return this.transmartResourceService.getCountsPerStudyAndConcept(constraint);
+
+      case ApiType.PICSURE:
+        return Observable.of({});
+    }
   }
 
   /**
@@ -72,7 +138,13 @@ export class ResourceService {
    * @returns {Observable<Object>}
    */
   getCountsPerStudy(constraint: Constraint): Observable<object> {
-    return this.transmartResourceService.getCountsPerStudy(constraint);
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return this.transmartResourceService.getCountsPerStudy(constraint);
+
+      case ApiType.PICSURE:
+        throw new Error('getCountsPerStudy() not supported (treeNodeCountsUpdate should be disabled)');
+    }
   }
 
   // -------------------------------------- observation calls --------------------------------------
@@ -82,7 +154,19 @@ export class ResourceService {
    * @returns {Observable<Object>}
    */
   getCounts(constraint: Constraint): Observable<object> {
-    return this.transmartResourceService.getCounts(constraint);
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return this.transmartResourceService.getCounts(constraint);
+
+      case ApiType.PICSURE:
+        return this.picSureResourceService.getPatientsCounts(constraint)
+          .map((patientCount: number) => {
+            return {
+              patientCount: patientCount,
+              observationCount: -1
+            }
+          });
+    }
   }
 
   // -------------------------------------- aggregate calls --------------------------------------
@@ -93,10 +177,16 @@ export class ResourceService {
    * @returns {Observable<object>}
    */
   getAggregate(constraint: ConceptConstraint): Observable<Aggregate> {
-    return this.transmartResourceService.getAggregate(constraint)
-      .map((tmConceptAggregate: object) => {
-        return TransmartMapper.mapTransmartConceptAggregate(tmConceptAggregate, constraint.concept.code);
-      });
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return this.transmartResourceService.getAggregate(constraint)
+          .map((tmConceptAggregate: object) => {
+            return TransmartMapper.mapTransmartConceptAggregate(tmConceptAggregate, constraint.concept.code);
+          });
+
+      case ApiType.PICSURE:
+        return this.picSureResourceService.getAggregate(constraint.concept);
+    }
   }
 
   // -------------------------------------- trial visit calls --------------------------------------
@@ -106,7 +196,13 @@ export class ResourceService {
    * @returns {Observable<R|T>}
    */
   getTrialVisits(constraint: Constraint): Observable<TrialVisit[]> {
-    return this.transmartResourceService.getTrialVisits(constraint);
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return this.transmartResourceService.getTrialVisits(constraint);
+
+      case ApiType.PICSURE:
+        return Observable.of([]);
+    }
   }
 
   // -------------------------------------- pedigree calls --------------------------------------
@@ -115,17 +211,29 @@ export class ResourceService {
    * @returns {Observable<Object[]>}
    */
   getPedigreeRelationTypes(): Observable<PedigreeRelationTypeResponse[]> {
-    return this.transmartResourceService.getPedigreeRelationTypes();
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return this.transmartResourceService.getPedigreeRelationTypes();
+
+      case ApiType.PICSURE:
+        return Observable.of([]);
+    }
   }
 
   // -------------------------------------- export calls --------------------------------------
   getExportDataTypes(constraint: Constraint): Observable<ExportDataType[]> {
-    return this.transmartResourceService.getExportFileFormats()
-      .switchMap(fileFormatNames => {
-        return this.transmartResourceService.getExportDataFormats(constraint)
-      }, (fileFormatNames, dataFormatNames) => {
-        return TransmartMapper.mapTransmartExportFormats(fileFormatNames, dataFormatNames);
-      });
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return this.transmartResourceService.getExportFileFormats()
+          .switchMap(fileFormatNames => {
+            return this.transmartResourceService.getExportDataFormats(constraint)
+          }, (fileFormatNames, dataFormatNames) => {
+            return TransmartMapper.mapTransmartExportFormats(fileFormatNames, dataFormatNames);
+          });
+
+      case ApiType.PICSURE:
+        throw new Error('Not supported');
+    }
   }
 
   /**
@@ -133,7 +241,13 @@ export class ResourceService {
    * @returns {Observable<ExportJob[]>}
    */
   getExportJobs(): Observable<any[]> {
-    return this.transmartResourceService.getExportJobs();
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return this.transmartResourceService.getExportJobs();
+
+      case ApiType.PICSURE:
+        throw new Error('Not supported');
+    }
   }
 
   /**
@@ -142,7 +256,13 @@ export class ResourceService {
    * @returns {Observable<ExportJob>}
    */
   createExportJob(name: string): Observable<ExportJob> {
-    return this.transmartResourceService.createExportJob(name);
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return this.transmartResourceService.createExportJob(name);
+
+      case ApiType.PICSURE:
+        throw new Error('Not supported');
+    }
   }
 
   /**
@@ -157,29 +277,34 @@ export class ResourceService {
                dataTypes: ExportDataType[],
                constraint: Constraint,
                dataTable: DataTable): Observable<ExportJob> {
-    let includeDataTable = false;
-    let hasSelectedFormat = false;
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        let includeDataTable = false;
+        let hasSelectedFormat = false;
 
-    for (let dataType of dataTypes) {
-      if (dataType.checked) {
-        for (let fileFormat of dataType.fileFormats) {
-          if (fileFormat.checked) {
-            if (fileFormat.name === 'TSV' && dataType.name === 'clinical') {
-              includeDataTable = true;
+        for (let dataType of dataTypes) {
+          if (dataType.checked) {
+            for (let fileFormat of dataType.fileFormats) {
+              if (fileFormat.checked) {
+                if (fileFormat.name === 'TSV' && dataType.name === 'clinical') {
+                  includeDataTable = true;
+                }
+                hasSelectedFormat = true;
+              }
             }
-            hasSelectedFormat = true;
           }
         }
-      }
-    }
-    if (hasSelectedFormat) {
-      const transmartTableState: TransmartTableState = includeDataTable ? TransmartMapper.mapDataTableToTableState(dataTable) : null;
-      const elements = TransmartMapper.mapExportDataTypes(dataTypes, this.transmartResourceService.exportDataView);
-      return this.transmartResourceService.runExportJob(job.id, constraint, elements, transmartTableState);
-    } else {
-      return Observable.of(null);
-    }
+        if (hasSelectedFormat) {
+          const transmartTableState: TransmartTableState = includeDataTable ? TransmartMapper.mapDataTableToTableState(dataTable) : null;
+          const elements = TransmartMapper.mapExportDataTypes(dataTypes, this.transmartResourceService.exportDataView);
+          return this.transmartResourceService.runExportJob(job.id, constraint, elements, transmartTableState);
+        } else {
+          return Observable.of(null);
+        }
 
+      case ApiType.PICSURE:
+        throw new Error('Not supported');
+    }
   }
 
   /**
@@ -188,7 +313,13 @@ export class ResourceService {
    * @returns {Observable<blob>}
    */
   downloadExportJob(jobId: string) {
-    return this.transmartResourceService.downloadExportJob(jobId);
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return this.transmartResourceService.downloadExportJob(jobId);
+
+      case ApiType.PICSURE:
+        throw new Error('Not supported');
+    }
   }
 
   /**
@@ -197,7 +328,13 @@ export class ResourceService {
    * @returns {Observable<blob>}
    */
   cancelExportJob(jobId: string): Observable<{}> {
-    return this.transmartResourceService.cancelExportJob(jobId);
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return this.transmartResourceService.cancelExportJob(jobId);
+
+      case ApiType.PICSURE:
+        throw new Error('Not supported');
+    }
   }
 
   /**
@@ -206,7 +343,13 @@ export class ResourceService {
    * @returns {Observable<blob>}
    */
   archiveExportJob(jobId: string): Observable<{}> {
-    return this.transmartResourceService.archiveExportJob(jobId);
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return this.transmartResourceService.archiveExportJob(jobId);
+
+      case ApiType.PICSURE:
+        throw new Error('Not supported');
+    }
   }
 
   // -------------------------------------- query calls --------------------------------------
@@ -215,10 +358,17 @@ export class ResourceService {
    * @returns {Observable<TransmartQuery[]>}
    */
   getQueries(): Observable<Query[]> {
-    return this.transmartResourceService.getQueries()
-      .map((transmartQueries: TransmartQuery[]) => {
-        return TransmartMapper.mapTransmartQueries(transmartQueries);
-      });
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return this.transmartResourceService.getQueries()
+          .map((transmartQueries: TransmartQuery[]) => {
+            return TransmartMapper.mapTransmartQueries(transmartQueries);
+          });
+
+      case ApiType.PICSURE:
+        console.warn('getQueries() not supported');
+        return Observable.of([]);
+    }
   }
 
   /**
@@ -227,14 +377,20 @@ export class ResourceService {
    * @returns {Observable<Query>}
    */
   saveQuery(query: Query): Observable<Query> {
-    let transmartQuery: TransmartQuery = TransmartMapper.mapQuery(query);
-    return this.transmartResourceService.saveQuery(transmartQuery)
-      .map((newlySavedQuery: TransmartQuery) => {
-        // since we already know what query we want to save, i.e. the one in the input argument
-        // there is no need to use the returned transmart query and map it to Query,
-        // it is fine just returning the existing query
-        return query;
-      });
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        let transmartQuery: TransmartQuery = TransmartMapper.mapQuery(query);
+        return this.transmartResourceService.saveQuery(transmartQuery)
+          .map((newlySavedQuery: TransmartQuery) => {
+            // since we already know what query we want to save, i.e. the one in the input argument
+            // there is no need to use the returned transmart query and map it to Query,
+            // it is fine just returning the existing query
+            return query;
+          });
+
+      case ApiType.PICSURE:
+        throw new Error('Not supported');
+    }
   }
 
   /**
@@ -244,7 +400,13 @@ export class ResourceService {
    * @returns {Observable<{}>}
    */
   updateQuery(queryId: string, queryBody: object): Observable<{}> {
-    return this.transmartResourceService.updateQuery(queryId, queryBody);
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return this.transmartResourceService.updateQuery(queryId, queryBody);
+
+      case ApiType.PICSURE:
+        throw new Error('Not supported');
+    }
   }
 
   /**
@@ -253,34 +415,59 @@ export class ResourceService {
    * @returns {Observable<any>}
    */
   deleteQuery(queryId: string): Observable<{}> {
-    return this.transmartResourceService.deleteQuery(queryId);
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return this.transmartResourceService.deleteQuery(queryId);
+
+      case ApiType.PICSURE:
+        throw new Error('Not supported');
+    }
   }
 
   // -------------------------------------- patient set calls --------------------------------------
   saveSubjectSet(name: string, constraint: Constraint): Observable<SubjectSet> {
-    return this.transmartResourceService.savePatientSet(name, constraint);
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return this.transmartResourceService.savePatientSet(name, constraint);
+
+      case ApiType.PICSURE:
+        throw new Error('saveSubjectSet() not supported (autoSaveSubjectSets should be disabled)');
+    }
   }
 
   // -------------------------------------- query differences --------------------------------------
   diffQuery(queryId: string): Observable<object[]> {
-    return this.transmartResourceService.diffQuery(queryId);
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return this.transmartResourceService.diffQuery(queryId);
+
+      case ApiType.PICSURE:
+        throw new Error('Not supported');
+    }
   }
 
   // -------------------------------------- data table ---------------------------------------------
   getDataTable(dataTable: DataTable): Observable<DataTable> {
-    let isUsingHeaders = dataTable.isUsingHeaders;
-    let offset = dataTable.offset;
-    let limit = dataTable.limit;
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        let isUsingHeaders = dataTable.isUsingHeaders;
+        let offset = dataTable.offset;
+        let limit = dataTable.limit;
 
-    return this.getDimensions(dataTable.constraint)
-      .switchMap((transmartStudyDimensions: TransmartStudyDimensions) => {
-        let tableState: TransmartTableState =
-          TransmartMapper.mapStudyDimensionsToTableState(transmartStudyDimensions, dataTable);
-        const constraint: Constraint = dataTable.constraint;
-        return this.transmartResourceService.getDataTable(tableState, constraint, offset, limit)
-      }, (transmartStudyDimensions: TransmartStudyDimensions, transmartTable: TransmartDataTable) => {
-        return TransmartMapper.mapTransmartDataTable(transmartTable, isUsingHeaders, offset, limit)
-      });
+        return this.getTransmartDimensions(dataTable.constraint)
+          .switchMap((transmartStudyDimensions: TransmartStudyDimensions) => {
+            let tableState: TransmartTableState =
+              TransmartMapper.mapStudyDimensionsToTableState(transmartStudyDimensions, dataTable);
+            const constraint: Constraint = dataTable.constraint;
+            return this.transmartResourceService.getDataTable(tableState, constraint, offset, limit)
+          }, (transmartStudyDimensions: TransmartStudyDimensions, transmartTable: TransmartDataTable) => {
+            return TransmartMapper.mapTransmartDataTable(transmartTable, isUsingHeaders, offset, limit)
+          });
+
+      case ApiType.PICSURE:
+        console.warn('getDataTable() not supported');
+        return Observable.of(dataTable);
+    }
   }
 
   /**
@@ -288,7 +475,7 @@ export class ResourceService {
    * @param {Constraint} constraint
    * @returns {Observable<Dimension[]>}
    */
-  private getDimensions(constraint: Constraint): Observable<TransmartStudyDimensions> {
+  private getTransmartDimensions(constraint: Constraint): Observable<TransmartStudyDimensions> {
     return this.transmartResourceService.getStudyNames(constraint)
       .switchMap((studyElements: TransmartStudyDimensionElement[]) => {
         let studyNames: string[] = TransmartMapper.mapTransmartStudyDimensionElements(studyElements);
@@ -312,14 +499,20 @@ export class ResourceService {
 
   // -------------------------------------- cross table ---------------------------------------------
   getCrossTable(crossTable: CrossTable): Observable<CrossTable> {
-    return this.transmartResourceService
-      .getCrossTable(
-        crossTable.constraint,
-        crossTable.rowHeaderConstraints.map(constraints => ConstraintHelper.combineSubjectLevelConstraints(constraints)),
-        crossTable.columnHeaderConstraints.map(constraints => ConstraintHelper.combineSubjectLevelConstraints(constraints)))
-      .map((tmCrossTable: TransmartCrossTable) => {
-        return TransmartMapper.mapTransmartCrossTable(tmCrossTable, crossTable);
-      });
+    switch (this.apiType) {
+      case ApiType.TRANSMART:
+        return this.transmartResourceService
+          .getCrossTable(
+            crossTable.constraint,
+            crossTable.rowHeaderConstraints.map(constraints => ConstraintHelper.combineSubjectLevelConstraints(constraints)),
+            crossTable.columnHeaderConstraints.map(constraints => ConstraintHelper.combineSubjectLevelConstraints(constraints)))
+          .map((tmCrossTable: TransmartCrossTable) => {
+            return TransmartMapper.mapTransmartCrossTable(tmCrossTable, crossTable);
+          });
+
+      case ApiType.PICSURE:
+        throw new Error('Not supported');
+    }
   }
 
 }

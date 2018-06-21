@@ -43,6 +43,7 @@ export class GbMainComponent implements OnInit {
     window.addEventListener('resize', this.onResize.bind(this));
 
     console.log(`Initialise services ...`);
+    this.resourceService.init();
     this.queryService.init();
     this.constraintService.init();
   }
