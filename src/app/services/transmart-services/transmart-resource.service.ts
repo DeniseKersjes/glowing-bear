@@ -19,6 +19,7 @@ import {TransmartExportElement} from '../../models/transmart-models/transmart-ex
 import {TransmartCrossTable} from '../../models/transmart-models/transmart-cross-table';
 import {TransmartConstraintMapper} from '../../utilities/transmart-utilities/transmart-constraint-mapper';
 import {ErrorHelper} from '../../utilities/error-helper';
+import {ApiEndpointService} from '../api-endpoint.service';
 
 @Injectable()
 export class TransmartResourceService {
@@ -26,12 +27,10 @@ export class TransmartResourceService {
   // the export data view has an alternative 'surveyTable', specifically for NTR project
   private _exportDataView = 'default';
   private _dateColumnsIncluded = true;
-  private _endpointUrl: string;
 
   constructor(private appConfig: AppConfig,
-              private http: HttpClient) {
+              private apiEndpointService: ApiEndpointService) {
     this.exportDataView = appConfig.getConfig('export-data-view', 'default');
-    this.endpointUrl = `${this.appConfig.getConfig('api-url')}/${this.appConfig.getConfig('api-version')}`;
   }
 
   get exportDataView(): string {
@@ -50,74 +49,6 @@ export class TransmartResourceService {
     this._dateColumnsIncluded = value;
   }
 
-  get endpointUrl(): string {
-    return this._endpointUrl;
-  }
-
-  set endpointUrl(value: string) {
-    this._endpointUrl = value;
-  }
-
-  /**
-   * Make a post http request
-   * @param urlPart - the part used in baseUrl/urlPart
-   * @param body
-   * @param responseField
-   * @returns {Observable<any | any>}
-   */
-  private postCall(urlPart, body, responseField) {
-    const url = `${this.endpointUrl}/${urlPart}`;
-    if (responseField) {
-      return this.http.post(url, body)
-        .map(res => res[responseField])
-        .catch(ErrorHelper.handleError.bind(this));
-    } else {
-      return this.http.post(url, body)
-        .catch(ErrorHelper.handleError.bind(this));
-    }
-  }
-
-  /**
-   * Make a get http request
-   * @param urlPart - the part used in baseUrl/urlPart
-   * @param responseField
-   * @returns {Observable<any | any>}
-   */
-  private getCall(urlPart, responseField) {
-    const url = `${this.endpointUrl}/${urlPart}`;
-    if (responseField) {
-      return this.http.get(url)
-        .map(res => res[responseField])
-        .catch(ErrorHelper.handleError.bind(this));
-    } else {
-      return this.http.get(url)
-        .catch(ErrorHelper.handleError.bind(this));
-    }
-  }
-
-  /**
-   * Make a put http request
-   * @param urlPart
-   * @param body
-   * @returns {Observable<any | any>}
-   */
-  private putCall(urlPart, body) {
-    let url = `${this.endpointUrl}/${urlPart}`;
-    return this.http.put(url, body)
-      .catch(ErrorHelper.handleError.bind(this));
-  }
-
-  /**
-   * Make a delete http request
-   * @param urlPart
-   * @returns {Observable<any | any>}
-   */
-  private deleteCall(urlPart) {
-    let url = `${this.endpointUrl}/${urlPart}`;
-    return this.http.delete(url)
-      .catch(ErrorHelper.handleError.bind(this));
-  }
-
   // -------------------------------------- tree node calls --------------------------------------
   /**
    * Returns the available studies.
@@ -126,7 +57,7 @@ export class TransmartResourceService {
   getStudies(): Observable<Study[]> {
     const urlPart = 'studies';
     const responseField = 'studies';
-    return this.getCall(urlPart, responseField);
+    return this.apiEndpointService.getCall(urlPart, responseField);
   }
 
   /**
@@ -146,7 +77,19 @@ export class TransmartResourceService {
       urlPart += '&tags=true';
     }
     const responseField = 'tree_nodes';
-    return this.getCall(urlPart, responseField);
+    return this.apiEndpointService.getCall(urlPart, responseField);
+    // todo: get that from transmart: node['visualAttributes'].includes('LEAF') = leaf
+    // for transmart: !== UNKWOWN: queryable
+    // todo: generate the treenode object correctly here
+    // todo for transmart: put that in the transmart resource service!
+    // this should be done in transamrt specific stuff
+    // if (node.constraint) {
+    //   node.constraint['fullName'] = node.fullName;
+    //   node.constraint['name'] = node.name;
+    //   node.constraint['conceptPath'] = node.conceptPath;
+    //   node.constraint['conceptCode'] = node.conceptCode;
+    //   node.constraint['valueType'] = node.type;
+    // }
   }
 
   // -------------------------------------- observations calls --------------------------------------
@@ -160,7 +103,7 @@ export class TransmartResourceService {
     const urlPart = 'observations/counts_per_study_and_concept';
     const body = {constraint: TransmartConstraintMapper.mapConstraint(constraint)};
     const responseField = 'countsPerStudy';
-    return this.postCall(urlPart, body, responseField);
+    return this.apiEndpointService.postCall(urlPart, body, responseField);
   }
 
   /**
@@ -173,7 +116,7 @@ export class TransmartResourceService {
     const urlPart = 'observations/counts_per_study';
     const body = {constraint: TransmartConstraintMapper.mapConstraint(constraint)};
     const responseField = 'countsPerStudy';
-    return this.postCall(urlPart, body, responseField);
+    return this.apiEndpointService.postCall(urlPart, body, responseField);
   }
 
   // -------------------------------------- observation calls --------------------------------------
@@ -186,7 +129,7 @@ export class TransmartResourceService {
     const urlPart = 'observations/counts';
     const body = {constraint: TransmartConstraintMapper.mapConstraint(constraint)};
     const responseField = false;
-    return this.postCall(urlPart, body, responseField);
+    return this.apiEndpointService.postCall(urlPart, body, responseField);
   }
 
   // -------------------------------------- aggregate calls --------------------------------------
@@ -200,7 +143,7 @@ export class TransmartResourceService {
     const urlPart = 'observations/aggregates_per_concept';
     const body = {constraint: TransmartConstraintMapper.mapConstraint(constraint)};
     const responseField = 'aggregatesPerConcept';
-    return this.postCall(urlPart, body, responseField);
+    return this.apiEndpointService.postCall(urlPart, body, responseField);
   }
 
   // -------------------------------------- trial visit calls --------------------------------------
@@ -213,7 +156,7 @@ export class TransmartResourceService {
     const constraintString = JSON.stringify(TransmartConstraintMapper.mapConstraint(constraint));
     const urlPart = `dimensions/trial visit/elements?constraint=${constraintString}`;
     const responseField = 'elements';
-    return this.getCall(urlPart, responseField);
+    return this.apiEndpointService.getCall(urlPart, responseField);
   }
 
   // -------------------------------------- pedigree calls --------------------------------------
@@ -224,7 +167,7 @@ export class TransmartResourceService {
   getPedigreeRelationTypes(): Observable<PedigreeRelationTypeResponse[]> {
     const urlPart = 'pedigree/relation_types';
     const responseField = 'relationTypes';
-    return this.getCall(urlPart, responseField);
+    return this.apiEndpointService.getCall(urlPart, responseField);
   }
 
   // -------------------------------------- export calls --------------------------------------
@@ -237,14 +180,14 @@ export class TransmartResourceService {
     const urlPart = 'export/data_formats';
     const body = {constraint: TransmartConstraintMapper.mapConstraint(constraint)};
     const responseField = 'dataFormats';
-    return this.postCall(urlPart, body, responseField);
+    return this.apiEndpointService.postCall(urlPart, body, responseField);
   }
 
   getExportFileFormats(): Observable<string[]> {
     const dataView = this.exportDataView;
     const urlPart = `export/file_formats?dataView=${dataView}`;
     const responseField = 'fileFormats';
-    return this.getCall(urlPart, responseField);
+    return this.apiEndpointService.getCall(urlPart, responseField);
   }
 
   /**
@@ -254,7 +197,7 @@ export class TransmartResourceService {
   getExportJobs(): Observable<any[]> {
     const urlPart = 'export/jobs';
     const responseField = 'exportJobs';
-    return this.getCall(urlPart, responseField);
+    return this.apiEndpointService.getCall(urlPart, responseField);
   }
 
   /**
@@ -265,7 +208,7 @@ export class TransmartResourceService {
   createExportJob(name: string): Observable<ExportJob> {
     const urlPart = `export/job?name=${name}`;
     const responseField = 'exportJob';
-    return this.postCall(urlPart, {}, responseField);
+    return this.apiEndpointService.postCall(urlPart, {}, responseField);
   }
 
   /**
@@ -297,7 +240,7 @@ export class TransmartResourceService {
     if (tableState) {
       body['tableConfig'] = tableState;
     }
-    return this.postCall(urlPart, body, responseField);
+    return this.apiEndpointService.postCall(urlPart, body, responseField);
   }
 
   /**
@@ -306,9 +249,8 @@ export class TransmartResourceService {
    * @returns {Observable<blob>}
    */
   downloadExportJob(jobId: string) {
-    let url = `${this.endpointUrl}/export/${jobId}/download`;
-    return this.http.get(url, {responseType: 'blob'})
-      .catch(ErrorHelper.handleError.bind(this));
+    let urlPart = `export/${jobId}/download`;
+    return this.apiEndpointService.getCall(urlPart, undefined, {responseType: 'blob'});
   }
 
   /**
@@ -319,7 +261,7 @@ export class TransmartResourceService {
   cancelExportJob(jobId: string): Observable<{}> {
     const urlPart = `export/${jobId}/cancel`;
     const responseField = 'exportJob';
-    return this.postCall(urlPart, {}, responseField);
+    return this.apiEndpointService.postCall(urlPart, {}, responseField);
   }
 
   /**
@@ -329,7 +271,7 @@ export class TransmartResourceService {
    */
   archiveExportJob(jobId: string): Observable<{}> {
     const urlPart = `export/${jobId}`;
-    return this.deleteCall(urlPart);
+    return this.apiEndpointService.deleteCall(urlPart);
   }
 
   // -------------------------------------- query calls --------------------------------------
@@ -340,7 +282,7 @@ export class TransmartResourceService {
   getQueries(): Observable<TransmartQuery[]> {
     const urlPart = `queries`;
     const responseField = 'queries';
-    return this.getCall(urlPart, responseField);
+    return this.apiEndpointService.getCall(urlPart, responseField);
   }
   /**
    * save a new query
@@ -371,7 +313,7 @@ export class TransmartResourceService {
     if (transmartQuery.queryBlob) {
       queryBody['queryBlob'] = transmartQuery.queryBlob;
     }
-    return this.postCall(urlPart, queryBody, null);
+    return this.apiEndpointService.postCall(urlPart, queryBody, null);
   }
 
   /**
@@ -382,7 +324,7 @@ export class TransmartResourceService {
    */
   updateQuery(queryId: string, queryBody: object): Observable<{}> {
     const urlPart = `queries/${queryId}`;
-    return this.putCall(urlPart, queryBody);
+    return this.apiEndpointService.putCall(urlPart, queryBody);
   }
 
   /**
@@ -392,21 +334,21 @@ export class TransmartResourceService {
    */
   deleteQuery(queryId: string): Observable<{}> {
     const urlPart = `queries/${queryId}`;
-    return this.deleteCall(urlPart);
+    return this.apiEndpointService.deleteCall(urlPart);
   }
 
   // -------------------------------------- patient set calls --------------------------------------
   savePatientSet(name: string, constraint: Constraint): Observable<SubjectSet> {
     const urlPart = `patient_sets?name=${name}&reuse=true`;
     const body = TransmartConstraintMapper.mapConstraint(constraint);
-    return this.postCall(urlPart, body, null);
+    return this.apiEndpointService.postCall(urlPart, body, null);
   }
 
   // -------------------------------------- query differences --------------------------------------
   diffQuery(queryId: string): Observable<object[]> {
     const urlPart = `queries/${queryId}/sets`;
     const responseField = 'querySets';
-    return this.getCall(urlPart, responseField);
+    return this.apiEndpointService.getCall(urlPart, responseField);
   }
 
   // -------------------------------------- data table ---------------------------------------------
@@ -431,14 +373,14 @@ export class TransmartResourceService {
       rowSort: tableState.rowSort,
       columnSort: tableState.columnSort
     };
-    return this.postCall(urlPart, body, null);
+    return this.apiEndpointService.postCall(urlPart, body, null);
   }
 
   getStudyNames(constraint: Constraint): Observable<TransmartStudyDimensionElement[]> {
     const urlPart = `dimensions/study/elements`;
     const body = {constraint: TransmartConstraintMapper.mapConstraint(constraint)};
     const responseField = 'elements';
-    return this.postCall(urlPart, body, responseField);
+    return this.apiEndpointService.postCall(urlPart, body, responseField);
   }
 
   getAvailableDimensions(studyNames: string[]): Observable<TransmartStudy[]> {
@@ -446,7 +388,7 @@ export class TransmartResourceService {
       let params = JSON.stringify(studyNames);
       const urlPart = `studies/studyIds?studyIds=${params}`;
       const responseField = 'studies';
-      return this.getCall(urlPart, responseField);
+      return this.apiEndpointService.getCall(urlPart, responseField);
     } else {
       return Observable.of([]);
     }
@@ -461,7 +403,7 @@ export class TransmartResourceService {
       rowConstraints: rowConstraints.map(constraint => TransmartConstraintMapper.mapConstraint(constraint)),
       columnConstraints: columnConstraints.map(constraint => TransmartConstraintMapper.mapConstraint(constraint))
     };
-    return this.postCall(urlPart, body, null);
+    return this.apiEndpointService.postCall(urlPart, body, null);
   }
 
 }
