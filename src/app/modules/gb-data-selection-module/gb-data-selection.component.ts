@@ -1,6 +1,7 @@
 import {Component, OnInit} from '@angular/core';
 import {FormatHelper} from '../../utilities/format-helper';
 import {QueryService} from '../../services/query.service';
+import {AppConfig} from '../../config/app.config';
 
 @Component({
   selector: 'gb-data-selection',
@@ -9,7 +10,8 @@ import {QueryService} from '../../services/query.service';
 })
 export class GbDataSelectionComponent implements OnInit {
 
-  constructor(public queryService: QueryService) {
+  constructor(public queryService: QueryService,
+              private config: AppConfig) {
   }
 
   ngOnInit() {
@@ -29,6 +31,14 @@ export class GbDataSelectionComponent implements OnInit {
    * @param event
    */
   closeAccordion(event) {
+  }
+
+  get variableSelectionEnabled(): boolean {
+    return this.config.getConfig('enable-variable-selection', true);
+  }
+
+  get dataTableEnabled(): boolean {
+    return this.config.getConfig('enable-data-table', true);
   }
 
   get subjectCount_0(): string {

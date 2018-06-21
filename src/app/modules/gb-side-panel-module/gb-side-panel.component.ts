@@ -1,5 +1,6 @@
 import {Component, OnInit} from '@angular/core';
 import {NavbarService} from '../../services/navbar.service';
+import {AppConfig} from '../../config/app.config';
 
 @Component({
   selector: 'gb-side-panel',
@@ -8,7 +9,8 @@ import {NavbarService} from '../../services/navbar.service';
 })
 export class GbSidePanelComponent implements OnInit {
 
-  constructor(private navbarService: NavbarService) {
+  constructor(private navbarService: NavbarService,
+              private config: AppConfig) {
   }
 
   ngOnInit() {
@@ -16,5 +18,9 @@ export class GbSidePanelComponent implements OnInit {
 
   get isDataSelection(): boolean {
     return this.navbarService.isDataSelection;
+  }
+
+  get enableQuerySaving(): boolean {
+    return this.config.getConfig('enable-query-saving', true);
   }
 }

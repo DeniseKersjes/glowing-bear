@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import {MenuItem} from 'primeng/api';
+import {AppConfig} from '../config/app.config';
 
 @Injectable()
 export class NavbarService {
@@ -12,12 +13,17 @@ export class NavbarService {
   private _isExport = false;
 
 
-  constructor() {
+  constructor(private config: AppConfig) {
     this.items = [
-      {label: 'Data Selection', routerLink: '/data-selection'},
-      {label: 'Analysis', routerLink: '/analysis'},
-      {label: 'Export', routerLink: '/export'}
+      {label: 'Data Selection', routerLink: '/data-selection'}
     ];
+
+    if (config.getConfig('enable-analysis')) {
+      this.items.push({label: 'Analysis', routerLink: '/analysis'});
+    }
+    if (config.getConfig('enable-analysis')) {
+      this.items.push({label: 'Export', routerLink: '/export'});
+    }
   }
 
   updateNavbar(whichStep: string) {
