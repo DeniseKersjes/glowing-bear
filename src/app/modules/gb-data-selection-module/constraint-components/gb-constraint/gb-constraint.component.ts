@@ -8,7 +8,9 @@ import {StudyConstraint} from '../../../../models/constraint-models/study-constr
 import {ConceptConstraint} from '../../../../models/constraint-models/concept-constraint';
 import {QueryService} from '../../../../services/query.service';
 import {Step} from '../../../../models/query-models/step';
-import {TreeNode} from 'primeng/api';
+import {CombinationState} from '../../../../models/constraint-models/combination-state';
+import {TreeNode} from '../../../../models/tree-models/tree-node';
+import {AppConfig} from '../../../../config/app.config';
 
 @Component({
   selector: 'gb-constraint',
@@ -25,7 +27,8 @@ export class GbConstraintComponent implements OnInit {
               protected resourceService: ResourceService,
               protected constraintService: ConstraintService,
               protected queryService: QueryService,
-              protected element: ElementRef) {
+              protected element: ElementRef,
+              protected config: AppConfig) {
   }
 
   ngOnInit() {
