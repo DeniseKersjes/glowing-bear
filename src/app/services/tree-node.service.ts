@@ -1,16 +1,19 @@
 import {Injectable} from '@angular/core';
 import {Concept} from '../models/constraint-models/concept';
 import {ConceptConstraint} from '../models/constraint-models/concept-constraint';
-import {TreeNode} from 'primeng/primeng';
+import {TreeNode} from '../models/tree-models/tree-node';
 import {ResourceService} from './resource.service';
 import {ConstraintService} from './constraint.service';
 import {NavbarService} from './navbar.service';
 import {ConceptType} from '../models/constraint-models/concept-type';
+import {TreeNodeType} from '../models/tree-models/tree-node-type';
+import {AppConfig} from '../config/app.config';
 
 type LoadingState = 'loading' | 'complete';
 
 @Injectable()
 export class TreeNodeService {
+  // todo: check if the tree copies are done properly
 
   /*
    * This service maintains three copies of tree nodes:
@@ -39,19 +42,11 @@ export class TreeNodeService {
 
   // the status indicating the when the tree is being loaded or finished loading
   public loadingTreeNodes: LoadingState = 'complete';
-  private _validTreeNodeTypes: string[] = [];
 
 
-  constructor(private resourceService: ResourceService, private navbarService: NavbarService) {
-    this.validTreeNodeTypes = [
-      'NUMERIC',
-      'CATEGORICAL',
-      'DATE',
-      'STUDY',
-      'TEXT',
-      'HIGH_DIMENSIONAL',
-      'UNKNOWN'
-    ];
+  constructor(private resourceService: ResourceService,
+              private navbarService: NavbarService,
+              private config: AppConfig) {
   }
 
   /**
@@ -62,9 +57,9 @@ export class TreeNodeService {
     this.loadingTreeNodes = 'loading';
     constraintService.conceptLabels = [];
     // Retrieve all tree nodes and extract the concepts iteratively
-    this.resourceService.getTreeNodes('\\', 2, false, true)
+    this.resourceService.getRootTreeNodes(2, false, true)
       .subscribe(
-        (treeNodes: object[]) => {
+        (treeNodes: TreeNode[]) => {
           this.loadingTreeNodes = 'complete';
           // reset concepts and concept constraints
           constraintService.concepts = [];
@@ -72,7 +67,9 @@ export class TreeNodeService {
           this.processTreeNodes(treeNodes, constraintService);
           treeNodes.forEach((function (node) {
             this.treeNodes.push(node); // to ensure the treeNodes pointer remains unchanged
-            this.loadTreeNext(node, constraintService);
+            if (this.config.getConfig('enable-greedy-tree-loading', true)) {
+              this.loadTreeNext(node, constraintService);
+            }
           }).bind(this));
         },
         err => console.error(err)
@@ -80,28 +77,42 @@ export class TreeNodeService {
   }
 
   /**
-   * Iteratively load the descendants of the given tree node
+   * Loads children of a node (if they were not already loaded).
+   * Meant to be used by the UI for the node-per-node browsing.
+   * @param {TreeNode} parentNode
+   * @param {ConstraintService} constraintService
+   */
+  public loadChildren(parentNode: TreeNode, constraintService: ConstraintService) {
+    if (!parentNode.leaf && !parentNode.childrenAttached) {
+      this.loadTreeNext(parentNode, constraintService);
+    }
+  }
+
+  /**
+   * Load the descendants of the given tree node, iteratively if greedy loading is enabled.
    * @param parentNode
+   * @param constraintService
    */
   private loadTreeNext(parentNode: TreeNode, constraintService: ConstraintService) {
+    this.loadingTreeNodes = 'loading';
     this.treeNodeCallsSent++;
     let depth = 20;
-    this.resourceService.getTreeNodes(parentNode['fullName'], depth, false, true)
+    this.resourceService.getChildTreeNodes(parentNode.path, depth, false, true)
       .subscribe(
-        (treeNodes: object[]) => {
+        (treeNodes: TreeNode[]) => {
+          this.loadingTreeNodes = 'complete';
           this.treeNodeCallsReceived++;
-          const refNode = treeNodes && treeNodes.length > 0 ? treeNodes[0] : undefined;
-          const children = refNode ? refNode['children'] : undefined;
-          if (children) {
-            parentNode['children'] = children;
-          }
-          this.processTreeNode(parentNode, constraintService);
-          this.processTreeNodes(children, constraintService);
-          let descendants = [];
-          this.getTreeNodeDescendantsWithDepth(refNode, depth, descendants);
-          if (descendants.length > 0) {
-            for (let descendant of descendants) {
-              this.loadTreeNext(descendant, constraintService);
+          parentNode.attachChildTree(treeNodes);
+          this.processTreeNodes(parentNode.children, constraintService);
+
+          // recursive load of missing children if depth loading is supported
+          if (this.config.getConfig('enable-greedy-tree-loading', true)) {
+            let descendants = [];
+            this.getTreeNodeDescendantsWithDepth(parentNode, depth, descendants);
+            if (descendants.length > 0) {
+              for (let descendant of descendants) {
+                this.loadTreeNext(descendant, constraintService);
+              }
             }
           }
         },
@@ -114,22 +125,23 @@ export class TreeNodeService {
    *  provided TreeNode array and their children.
    *  And augment tree nodes with PrimeNG tree-ui specifications
    * @param treeNodes
+   * @param constraintService
    */
-  private processTreeNodes(treeNodes: object[], constraintService: ConstraintService) {
+  private processTreeNodes(treeNodes: TreeNode[], constraintService: ConstraintService) {
     if (!treeNodes) {
       return;
     }
     for (let node of treeNodes) {
       this.processTreeNode(node, constraintService);
-      if (node['children']) {
-        this.processTreeNodes(node['children'], constraintService);
+      if (node.hasChildren()) {
+        this.processTreeNodes(node.children, constraintService);
       }
     }
   }
 
-  private processTreeNode(node: Object, constraintService: ConstraintService) {
+  private processTreeNode(node: TreeNode, constraintService: ConstraintService) {
     // Extract concept
-    if (node['visualAttributes'].includes('LEAF')) {
+    if (node.nodeType === TreeNodeType.CONCEPT) {
       let concept = this.getConceptFromTreeNode(node);
       if (constraintService.conceptLabels.indexOf(concept.label) === -1) {
         constraintService.concepts.push(concept);
@@ -139,42 +151,43 @@ export class TreeNodeService {
         constraintService.conceptConstraints.push(constraint);
         constraintService.allConstraints.push(constraint);
       }
-      if (node['constraint']) {
-        node['constraint']['fullName'] = node['fullName'];
-        node['constraint']['name'] = node['name'];
-        node['constraint']['conceptPath'] = node['conceptPath'];
-        node['constraint']['conceptCode'] = node['conceptCode'];
-        node['constraint']['valueType'] = node['type'];
-      }
     }
     // Add PrimeNG visual properties for tree nodes
     let countStr = ' ';
-    node['label'] = node['name'] + countStr;
-    if (node['metadata']) {
-      node['label'] = node['label'] + ' ⓘ';
+    node.label = node.name + countStr;
+    if (node.metadata) {
+      node.label = node.label + ' ⓘ';
     }
-    if (node['children']) {
-      if (node['type'] === 'UNKNOWN') {
-        node['expandedIcon'] = 'fa-folder-open';
-        node['collapsedIcon'] = 'fa-folder';
-      } else if (node['type'] === 'STUDY') {
-        node['expandedIcon'] = 'icon-folder-study-open';
-        node['collapsedIcon'] = 'icon-folder-study';
+
+    if (node.leaf) {
+      switch (node.conceptType) {
+        case ConceptType.NUMERICAL:
+          node.icon = 'icon-123';
+          break;
+        case ConceptType.HIGH_DIM:
+          node.icon = 'icon-hd';
+          break;
+        case ConceptType.CATEGORICAL:
+          node.icon = 'icon-abc';
+          break;
+        case ConceptType.DATE:
+          node.icon = 'fa-calendar';
+          break;
+        case ConceptType.TEXT:
+          node.icon = 'fa-newspaper-o';
+          break;
+        case ConceptType.SIMPLE:
+        default:
+          node.icon = 'fa-folder-o'; // todo: better logo for simple concepts and modifiers
       }
-      node['icon'] = '';
     } else {
-      if (node['type'] === 'NUMERIC') {
-        node['icon'] = 'icon-123';
-      } else if (node['type'] === 'HIGH_DIMENSIONAL') {
-        node['icon'] = 'icon-hd';
-      } else if (node['type'] === 'CATEGORICAL') {
-        node['icon'] = 'icon-abc';
-      } else if (node['type'] === 'DATE') {
-        node['icon'] = 'fa-calendar';
-      } else if (node['type'] === 'TEXT') {
-        node['icon'] = 'fa-newspaper-o';
+      node.icon = '';
+      if (node.nodeType === TreeNodeType.STUDY) {
+        node.expandedIcon = 'icon-folder-study-open';
+        node.collapsedIcon = 'icon-folder-study';
       } else {
-        node['icon'] = 'fa-folder-o';
+        node.expandedIcon = 'fa-folder-open';
+        node.collapsedIcon = 'fa-folder';
       }
     }
   }
@@ -186,15 +199,12 @@ export class TreeNodeService {
    */
   public getConceptFromTreeNode(treeNode: TreeNode): Concept {
     let concept = new Concept();
-    const tail = '\\' + treeNode['name'] + '\\';
-    const fullName = treeNode['fullName'];
-    let head = fullName.substring(0, fullName.length - tail.length);
-    concept.label = treeNode['name'] + ' (' + head + ')';
-    concept.path = treeNode['conceptPath'];
-    concept.type = <ConceptType> treeNode['type'];
-    concept.code = treeNode['conceptCode'];
-    concept.fullName = treeNode['fullName'];
-    concept.name = treeNode['name'];
+    concept.label = treeNode.displayName;
+    concept.path = treeNode.path;
+    concept.type = treeNode.conceptType;
+    concept.code = treeNode.conceptCode;
+    concept.fullName = treeNode.path;
+    concept.name = treeNode.name;
     return concept;
   }
 
@@ -208,18 +218,14 @@ export class TreeNodeService {
                                          depth: number,
                                          descendants: TreeNode[]) {
     if (treeNode) {
-      if (depth === 2) {
-        if (treeNode['children']) {
-          for (let child of treeNode['children']) {
-            descendants.push(child);
-          }
+      if (depth === 2 && treeNode.hasChildren()) {
+        for (let child of treeNode.children) {
+          descendants.push(child);
         }
-      } else if (depth > 2) {
-        if (treeNode['children']) {
-          for (let child of treeNode['children']) {
-            let newDepth = depth - 1;
-            this.getTreeNodeDescendantsWithDepth(child, newDepth, descendants);
-          }
+      } else if (depth > 2 && treeNode.hasChildren()) {
+        for (let child of treeNode.children) {
+          let newDepth = depth - 1;
+          this.getTreeNodeDescendantsWithDepth(child, newDepth, descendants);
         }
       }
     }
@@ -228,22 +234,18 @@ export class TreeNodeService {
   /**
    * Get the descendants of a tree node if a descendant has a type
    * that is not excluded
+   * Returns only directly queryable nodes.
+   * If queryable node has queryable children, they will not be included.
    * @param {TreeNode} treeNode
-   * @param {string[]} excludedTypes
    * @param {TreeNode[]} descendants
    */
-  public getTreeNodeDescendantsWithExcludedTypes(treeNode: TreeNode,
-                                                 excludedTypes: string[],
-                                                 descendants: TreeNode[]) {
-    if (treeNode) {
-      // If the tree node has children
-      if (treeNode['children']) {
-        for (let child of treeNode['children']) {
-          if (child['children']) {
-            this.getTreeNodeDescendantsWithExcludedTypes(child, excludedTypes, descendants);
-          } else if (excludedTypes.indexOf(child['type']) === -1) {
-            descendants.push(child);
-          }
+  public getQueryableDescendants(treeNode: TreeNode, descendants: TreeNode[]) {
+    if (treeNode && treeNode.hasChildren()) {
+      for (let child of treeNode.children) {
+        if (child.hasChildren()) {
+          descendants.push(child);
+        } else if (child.hasChildren()) {
+          this.getQueryableDescendants(child, descendants);
         }
       }
     }
@@ -253,6 +255,7 @@ export class TreeNodeService {
    * Update the tree table data for rendering the tree table in step 2, projection
    * based on a given set of concept codes as filtering criteria.
    * @param {Object} conceptCountMap
+   * @param checklist
    */
   public updateProjectionTreeData(conceptCountMap: object, checklist: Array<string>) {
     // If the tree nodes copy is empty, create it by duplicating the tree nodes
@@ -276,18 +279,18 @@ export class TreeNodeService {
   private copyTreeNodes(nodes: TreeNode[]): TreeNode[] {
     let nodesCopy = [];
     for (let node of nodes) {
-      let parent = node['parent'];
-      let children = node['children'];
-      node['parent'] = null;
-      node['children'] = null;
+      let parent = node.parent;
+      let children = node.children;
+      node.parent = null;
+      node.children = null;
       let nodeCopy = JSON.parse(JSON.stringify(node));
       if (children) {
         let childrenCopy = this.copyTreeNodes(children);
-        nodeCopy['children'] = childrenCopy;
+        nodeCopy.children = childrenCopy;
       }
       nodesCopy.push(nodeCopy);
-      node['parent'] = parent;
-      node['children'] = children;
+      node.parent = parent;
+      node.children = children;
     }
     return nodesCopy;
   }
@@ -323,7 +326,7 @@ export class TreeNodeService {
    * @returns {TreeNode}
    */
   private copyTreeNodeUpward(node: TreeNode): TreeNode {
-    let nodeCopy = {};
+    let nodeCopy = new TreeNode();
     let parentCopy = null;
     for (let key in node) {
       if (key === 'parent') {
@@ -333,7 +336,7 @@ export class TreeNodeService {
       }
     }
     if (parentCopy) {
-      nodeCopy['parent'] = parentCopy;
+      nodeCopy.parent = parentCopy;
     }
     return nodeCopy;
   }
@@ -343,22 +346,22 @@ export class TreeNodeService {
                                             conceptCountMap: object) {
     let nodesWithCodes = [];
     for (let node of nodes) {
-      if (conceptCodes.indexOf(node['conceptCode']) !== -1) {
+      if (conceptCodes.includes(node.conceptCode)) {
         let nodeCopy = node;
-        nodeCopy['expanded'] = false;
-        if (conceptCountMap[node['conceptCode']]) {
-          const patientCount = conceptCountMap[node['conceptCode']]['patientCount'];
-          const observationCount = conceptCountMap[node['conceptCode']]['observationCount'];
-          nodeCopy['label'] = nodeCopy['name'] + ` (sub: ${patientCount}, obs: ${observationCount})`;
+        nodeCopy.expanded = false;
+        if (conceptCountMap[node.conceptCode]) {
+          const patientCount = conceptCountMap[node.conceptCode]['patientCount'];
+          const observationCount = conceptCountMap[node.conceptCode]['observationCount'];
+          nodeCopy.label = nodeCopy.name + ` (sub: ${patientCount}, obs: ${observationCount})`;
         }
         nodesWithCodes.push(nodeCopy);
-      } else if (node['children']) {
+      } else if (node.hasChildren()) {
         let newNodeChildren =
-          this.updateProjectionTreeDataIterative(node['children'], conceptCodes, conceptCountMap);
+          this.updateProjectionTreeDataIterative(node.children, conceptCodes, conceptCountMap);
         if (newNodeChildren.length > 0) {
           let nodeCopy = this.copyTreeNodeUpward(node);
-          nodeCopy['expanded'] = this.depthOfTreeNode(nodeCopy) <= 2;
-          nodeCopy['children'] = newNodeChildren;
+          nodeCopy.expanded = nodeCopy.depth <= 2;
+          nodeCopy.children = newNodeChildren;
           nodesWithCodes.push(nodeCopy);
         }
       }
@@ -368,11 +371,11 @@ export class TreeNodeService {
 
   private checkProjectionTreeDataIterative(nodes: TreeNode[], checklist?: Array<string>) {
     for (let node of nodes) {
-      if (checklist && checklist.includes(node['fullName'])) {
+      if (checklist && checklist.includes(node.path)) {
         this.selectedProjectionTreeData.push(node);
       }
-      if (node['children']) {
-        this.checkProjectionTreeDataIterative(node['children'], checklist);
+      if (node.hasChildren()) {
+        this.checkProjectionTreeDataIterative(node.children, checklist);
       }
     }
   }
@@ -380,8 +383,8 @@ export class TreeNodeService {
   public checkAllProjectionTreeDataIterative(nodes: TreeNode[]) {
     for (let node of nodes) {
       this.selectedProjectionTreeData.push(node);
-      if (node['children']) {
-        this.checkAllProjectionTreeDataIterative(node['children']);
+      if (node.hasChildren()) {
+        this.checkAllProjectionTreeDataIterative(node.children);
       }
     }
   }
@@ -433,13 +436,11 @@ export class TreeNodeService {
     let index = 0;
     for (let elm of treeNodeElements) {
       let dataObject: TreeNode = treeNodeData[index];
-      if (this.isTreeNodeAstudy(dataObject) ||
-        this.isTreeNodeAconcept(dataObject)) {
+      if (dataObject.nodeType === TreeNodeType.STUDY || dataObject.nodeType === TreeNodeType.CONCEPT) {
         let treeNodeContent = elm.querySelector('.ui-treenode-content');
-        const identifier =
-          this.isTreeNodeAstudy(dataObject) ? dataObject['studyId'] : dataObject['conceptCode'];
+        const identifier = dataObject.conceptCode;
         const _map =
-          this.isTreeNodeAstudy(dataObject) ? studyCountMap : conceptCountMap;
+          dataObject.nodeType === TreeNodeType.STUDY ? studyCountMap : conceptCountMap;
         const patientCount =
           _map[identifier] ? _map[identifier]['patientCount'] : -1;
         const updated =
@@ -448,7 +449,7 @@ export class TreeNodeService {
         this.appendCountElement(treeNodeContent, patientCount, updated);
       }
       // If the tree node is currently expanded
-      if (dataObject['expanded']) {
+      if (dataObject.expanded) {
         let uiTreenodeChildren = elm.querySelector('.ui-treenode-children');
         if (uiTreenodeChildren) {
           this.updateTreeNodeCountsIterative(
@@ -480,13 +481,9 @@ export class TreeNodeService {
     }
   }
 
-  private depthOfTreeNode(node: TreeNode): number {
-    return node['fullName'] ? node['fullName'].split('\\').length - 2 : null;
-  }
-
   /**
    * Givena tree node path, find the parent tree node paths
-   * @param {string} path - taking the form of '\a\tree\node\path\'
+   * @param {string} path - taking the form of '\a\tree\node\path\' or '/a/tree/node/path/'
    * @returns {string[]}
    */
   public getParentTreeNodePaths(path: string): string[] {
@@ -504,14 +501,14 @@ export class TreeNodeService {
 
   public expandProjectionTreeDataIterative(nodes: TreeNode[], value: boolean) {
     for (let node of nodes) {
-      node['expanded'] = value;
-      if (node['children']) {
+      node.expanded = value;
+      if (node.children) {
         if (value) { // If it is expansion, expand it gradually.
           window.setTimeout((function () {
-            this.expandProjectionTreeDataIterative(node['children'], value);
+            this.expandProjectionTreeDataIterative(node.children, value);
           }).bind(this), 100);
         } else { // If it is collapse, collapse it immediately
-          this.expandProjectionTreeDataIterative(node['children'], value);
+          this.expandProjectionTreeDataIterative(node.children, value);
         }
       }
     }
@@ -539,7 +536,7 @@ export class TreeNodeService {
     let candidates = [];
     let result = [];
     for (let node of treeNodes) {
-      const path = node['fullName'];
+      const path = node.path;
       let isPathUsed = false;
       for (let candidate of candidates) {
         if (path.indexOf(candidate) > -1) {
@@ -574,67 +571,13 @@ export class TreeNodeService {
    */
   public findTreeNodesByPaths(nodes: TreeNode[], paths: string[], foundNodes: TreeNode[]) {
     for (let node of nodes) {
-      if (paths.includes(node['fullName'])) {
+      if (paths.includes(node.path)) {
         foundNodes.push(node);
       }
-      if (node['children']) {
-        this.findTreeNodesByPaths(node['children'], paths, foundNodes);
+      if (node.children) {
+        this.findTreeNodesByPaths(node.children, paths, foundNodes);
       }
     }
-  }
-
-  /**
-   * Find the ancestors of a tree node
-   * @param node
-   * @returns {Array}
-   */
-  public findTreeNodeAncestors(node) {
-    let fullName = node['fullName'];
-    let partsTemp = fullName.split('\\');
-    let parts = [];
-    for (let part of partsTemp) {
-      if (part !== '') {
-        parts.push(part);
-      }
-    }
-    let endingIndices = [];
-    for (let i = 0; i < parts.length - 1; i++) {
-      endingIndices.push(i);
-    }
-    let paths = [];
-    for (let index of endingIndices) {
-      let path = '\\';
-      for (let i = 0; i <= index; i++) {
-        path += parts[i] + '\\';
-      }
-      paths.push(path);
-    }
-    let foundNodes = [];
-    this.findTreeNodesByPaths(this.treeNodes, paths, foundNodes);
-    return foundNodes;
-  }
-
-  /**
-   * Check if a tree node is a concept node
-   * @param {TreeNode} node
-   * @returns {boolean}
-   */
-  public isTreeNodeAconcept(node: TreeNode): boolean {
-    const type = node['type'];
-    return type === 'NUMERIC' ||
-      type === 'CATEGORICAL' ||
-      type === 'DATE' ||
-      type === 'TEXT' ||
-      type === 'HIGH_DIMENSIONAL';
-  }
-
-  /**
-   * Check if a tree node is a study node
-   * @param {TreeNode} node
-   * @returns {boolean}
-   */
-  public isTreeNodeAstudy(node: TreeNode): boolean {
-    return node['type'] === 'STUDY';
   }
 
   /**
@@ -656,10 +599,10 @@ export class TreeNodeService {
       if (node) {
         const itemName = ((node || {})['metadata'] || {})['item_name'];
         if (items.indexOf(itemName) > -1) {
-          paths.push(node['fullName']);
+          paths.push(node.path);
         }
-        if (node['children']) {
-          this.convertItemsToPaths(node['children'], items, paths);
+        if (node.children) {
+          this.convertItemsToPaths(node.children, items, paths);
         }
       }
     });
@@ -703,14 +646,6 @@ export class TreeNodeService {
 
   set selectedProjectionTreeData(value: TreeNode[]) {
     this._selectedProjectionTreeData = value;
-  }
-
-  get validTreeNodeTypes(): string[] {
-    return this._validTreeNodeTypes;
-  }
-
-  set validTreeNodeTypes(value: string[]) {
-    this._validTreeNodeTypes = value;
   }
 
   get selectedTreeNode(): TreeNode {

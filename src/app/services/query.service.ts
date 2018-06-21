@@ -477,7 +477,7 @@ export class QueryService {
         } else if (this.treeNodeService.selectedProjectionTreeData.length > 0) {
           checklist = [];
           for (let selectedNode of this.treeNodeService.selectedProjectionTreeData) {
-            checklist.push(selectedNode['fullName']);
+            checklist.push(selectedNode.path);
           }
         }
         this.treeNodeService.updateProjectionTreeData(this.conceptCountMap_1, checklist);
@@ -614,7 +614,7 @@ export class QueryService {
     this.step = Step.I;
     if (query['patientsQuery']) {
       this.constraintService.clearSelectionConstraint();
-      let selectionConstraint = TransmartConstraintMapper.generateConstraintFromObject(query['patientsQuery']);
+      let selectionConstraint = this.resourceService.generateConstraintFromObject(query['patientsQuery']);
       this.constraintService.restoreSelectionConstraint(selectionConstraint);
       this.update_1();
     }
