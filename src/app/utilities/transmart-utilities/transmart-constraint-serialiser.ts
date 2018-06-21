@@ -13,6 +13,7 @@ import {CombinationConstraint} from '../../models/constraint-models/combination-
 import {StudyConstraint} from '../../models/constraint-models/study-constraint';
 import {AbstractConstraintVisitor} from '../constraint-utilities/abstract-constraint-visitor';
 import {Constraint} from '../../models/constraint-models/constraint';
+import {ConceptType} from '../../models/constraint-models/concept-type';
 
 /**
  * Serialisation class for serialising constraint objects for use in the TranSMART API.
@@ -88,7 +89,6 @@ export class TransmartConstraintSerialiser extends AbstractConstraintVisitor<obj
     if (constraint.mark === ConstraintMark.OBSERVATION) {
       result = {
         type: 'value',
-        valueType: constraint.valueType,
         operator: constraint.operator,
         value: constraint.value
       }
@@ -166,7 +166,7 @@ export class TransmartConstraintSerialiser extends AbstractConstraintVisitor<obj
 
   visitSubjectSetConstraint(constraint: SubjectSetConstraint): object {
     let result = null;
-    if (constraint.mark = ConstraintMark.OBSERVATION) {
+    if (constraint.mark === ConstraintMark.OBSERVATION) {
       const type = 'patient_set';
       if (constraint.subjectIds.length > 0) {
         result = {
@@ -277,12 +277,12 @@ export class TransmartConstraintSerialiser extends AbstractConstraintVisitor<obj
         args.push(conceptObj);
 
         if (constraint.valueConstraints.length > 0) {
-          if (constraint.concept.type === 'NUMERIC') {
+          if (constraint.concept.type === ConceptType.NUMERICAL) {
             // Add numerical values directly to the main constraint
             for (let val of constraint.valueConstraints) {
               args.push(this.visit(val));
             }
-          } else if (constraint.concept.type === 'CATEGORICAL') {
+          } else if (constraint.concept.type === ConceptType.CATEGORICAL) {
             // Wrap categorical values in an OR constraint
             let categorical = {
               type: 'or',
