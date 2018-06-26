@@ -615,7 +615,7 @@ export class GbConceptConstraintComponent extends GbConstraintComponent implemen
     event.stopPropagation();
     let selectedNode: TreeNode = this.treeNodeService.selectedTreeNode;
     this.droppedConstraint =
-      this.constraintService.generateConstraintFromTreeNode(selectedNode, selectedNode.dropMode);
+      this.constraintService.generateConstraintFromTreeNode(selectedNode, selectedNode ? selectedNode.dropMode : null);
     this.treeNodeService.selectedTreeNode = null;
     if (this.droppedConstraint) {
       this.constraint = this.droppedConstraint;
