@@ -178,8 +178,12 @@ export class QueryService {
 
     // initial updates
     this.update_1(true);
-    this.update_2();
-    this.update_3();
+    if (this.appConfig.getConfig('enable-variable-selection', true)) {
+      this.update_2();
+    }
+    if (this.appConfig.getConfig('enable-data-table', true)) {
+      this.update_3();
+    }
   }
 
   /**

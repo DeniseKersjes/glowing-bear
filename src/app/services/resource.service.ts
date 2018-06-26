@@ -162,7 +162,7 @@ export class ResourceService {
         return this.picSureResourceService.getPatientsCounts(constraint)
           .map((patientCount: number) => {
             return {
-              patientCount: patientCount,
+              patientCount: Number(patientCount),
               observationCount: -1
             }
           });
